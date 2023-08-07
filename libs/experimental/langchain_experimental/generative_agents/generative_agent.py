@@ -8,7 +8,7 @@ from langchain.schema.language_model import BaseLanguageModel
 from pydantic import BaseModel, Field
 
 from langchain_experimental.generative_agents.memory import GenerativeAgentMemory
-
+##made a change
 
 class GenerativeAgent(BaseModel):
     """An Agent as a character with memory and innate characteristics."""
