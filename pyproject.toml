@@ -1,7 +1,7 @@
 [tool.poetry]
-name = "langchain-monorepo"
+name = "langchain-langchain_auction_agent"
 version = "0.0.1"
-description = "LangChain mono-repo"
+description = "LangChain Auction Agent"
 authors = []
 license = "MIT"
 readme = "README.md"
