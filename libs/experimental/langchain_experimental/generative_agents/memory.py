@@ -117,11 +117,11 @@ class GenerativeAgentMemory(BaseMemory):
     def _score_memory_importance(self, memory_content: str) -> float:
         """Score the absolute importance of the given memory."""
         prompt = PromptTemplate.from_template(
-            "On the scale of 1 to 10, where 1 is purely mundane"
-            + " (e.g., brushing teeth, making bed) and 10 is"
-            + " extremely poignant (e.g., a break up, college"
-            + " acceptance), rate the likely poignancy of the"
-            + " following piece of memory. Respond with a single integer."
+            "On a scale of 1 to 10, where 1 is entirely irrelevant"
+            + " (e.g., the weather during the auction) and 10 is"
+            + " extremely crucial (e.g., the highest bid, auction rules),"
+            + " rate the likely importance of the following memory in the context of the auction."
+            + " Respond with a single integer."
             + "\nMemory: {memory_content}"
             + "\nRating: "
         )
@@ -137,14 +137,15 @@ class GenerativeAgentMemory(BaseMemory):
     def _score_memories_importance(self, memory_content: str) -> List[float]:
         """Score the absolute importance of the given memory."""
         prompt = PromptTemplate.from_template(
-            "On the scale of 1 to 10, where 1 is purely mundane"
-            + " (e.g., brushing teeth, making bed) and 10 is"
-            + " extremely poignant (e.g., a break up, college"
-            + " acceptance), rate the likely poignancy of the"
-            + " following piece of memory. Always answer with only a list of numbers."
+            
+            "On the scale of 1 to 10, where 1 is entirely irrelevant"
+            + " (e.g., the weather during the auction) and 10 is"
+            + " extremely crucial (e.g., the highest bid, auction rules),"
+            + " rate the likely importance of the following memories in the context of the auction."
+            + " Always answer with only a list of numbers."
             + " If just given one memory still respond in a list."
-            + " Memories are separated by semi colans (;)"
-            + "\Memories: {memory_content}"
+            + " Memories are separated by semi colons (;)"
+            + "\nMemories: {memory_content}"
             + "\nRating: "
         )
         scores = self.chain(prompt).run(memory_content=memory_content).strip()

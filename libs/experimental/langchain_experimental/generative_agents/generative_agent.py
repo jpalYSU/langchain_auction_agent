@@ -8,7 +8,7 @@ from langchain.schema.language_model import BaseLanguageModel
 from pydantic import BaseModel, Field
 
 from langchain_experimental.generative_agents.memory import GenerativeAgentMemory
-##made a change
+
 
 class GenerativeAgent(BaseModel):
     """An Agent as a character with memory and innate characteristics."""
@@ -23,6 +23,7 @@ class GenerativeAgent(BaseModel):
     """The traits of the character you wish not to change."""
     memory: GenerativeAgentMemory
     """The memory object that combines relevance, recency, and 'importance'."""
+
     llm: BaseLanguageModel
     """The underlying language model."""
     verbose: bool = False
@@ -245,4 +246,200 @@ Relevant context:
         current_time_str = now.strftime("%B %d, %Y, %I:%M %p")
         return (
             f"{summary}\nIt is {current_time_str}.\n{self.name}'s status: {self.status}"
+        )
+
+
+class AuctionAgent(GenerativeAgent):
+    """An Agent adapted for auctions."""
+
+    budget: int
+    """The agent's budget for the auction."""
+    item_of_interest: str
+    """The items the agent is interested in."""
+    item_valuation: Optional[float] = None
+    """The agent's valuation of the item."""
+    bidding_goal: Optional[str] = None
+    """The agent's goal for the bidding."""
+
+    def _get_current_bid_from_observation(self, observation: str) -> int:
+        prompt = PromptTemplate.from_template(
+            "What is the current bid in the following observation? {observation}"
+            + "\nCurrent Bid="
+        )
+        return int(self.chain(prompt).run(observation=observation).strip())
+
+    def _get_item_of_interest_from_observation(self, observation: str) -> str:
+        prompt = PromptTemplate.from_template(
+            "What is the item of interest in the following observation? {observation}"
+            + "\nItem of Interest="
+        )
+        return self.chain(prompt).run(observation=observation).strip()
+
+    def generate_bid(
+        self, observation: str, now: Optional[datetime] = None
+    ) -> Tuple[bool, str]:
+        """Generate a bid based on a given observation."""
+        call_to_action_template = (
+            "Should {agent_name} bid on the item, and if so,"
+            + " what would be an appropriate bid? Respond in one line."
+            + ' If the action is to bid, write:\nBID: "amount to bid"'
+            + "\notherwise, write:\nPASS."
+            + "\n\n"
+        )
+        full_result = self._generate_reaction(
+            observation, call_to_action_template, now=now
+        )
+        result = full_result.strip().split("\n")[0]
+        if "BID:" in result:
+            bid_amount = int(self._clean_response(result.split("BID:")[-1]))
+            self.budget -= bid_amount  # Decrease budget
+            return True, f"{self.name} bids {bid_amount}"
+        else:
+            return False, f"{self.name} passes"
+
+    def _compute_agent_summary(self) -> str:
+        """Compute the agent's summary based on its auction activity."""
+        prompt = PromptTemplate.from_template(
+            "How would you summarize {name}'s bidding activity and remaining budget"
+            + " given the following memories:\n"
+            + "{relevant_memories}"
+            + "\n\nSummary: "
+        )
+        return (
+            self.chain(prompt)
+            .run(name=self.name, queries=[f"{self.name}'s bidding activity"])
+            .strip()
+        )
+    
+    def _generate_reaction(
+        self, observation: str, suffix: str, now: Optional[datetime] = None
+    ) -> str:
+        """React to a given observation or dialogue act."""
+        prompt = PromptTemplate.from_template(
+        "{agent_summary_description}"
+        + "\nIt is {current_time}."
+        + "\n{agent_name}'s status: {agent_status}"
+        + "\n{agent_name}'s item valuation: {item_valuation}"
+        + "\n{agent_name}'s bidding goal: {bidding_goal}"
+        + "\nSummary of relevant context from {agent_name}'s memory:"
+        + "\n{relevant_memories}"
+        + "\nMost recent observations: {most_recent_memories}"
+        + "\nObservation: {observation}"
+        + "\n\n"
+        + suffix
+        )
+        agent_summary_description = self.get_summary(now=now)
+        relevant_memories_str = self.summarize_related_memories(observation)
+        current_time_str = (
+            datetime.now().strftime("%B %d, %Y, %I:%M %p")
+            if now is None
+            else now.strftime("%B %d, %Y, %I:%M %p")
+        )
+        kwargs: Dict[str, Any] = dict(
+            agent_summary_description=agent_summary_description,
+            current_time=current_time_str,
+            relevant_memories=relevant_memories_str,
+            agent_name=self.name,
+            observation=observation,
+            agent_status=self.status,
+        )
+        consumed_tokens = self.llm.get_num_tokens(
+            prompt.format(most_recent_memories="", **kwargs)
+        )
+        kwargs[self.memory.most_recent_memories_token_key] = consumed_tokens
+        return self.chain(prompt=prompt).run(**kwargs).strip()
+
+    def generate_bid_reaction(
+        self, observation: str, now: Optional[datetime] = None
+    ) -> Tuple[bool, str]:
+        """React to a given observation."""
+        call_to_action_template = (
+            f"Given the highest bid and bidder in {observation}, "
+            + "should {agent_name} react? If the action is to place a bid, write:"
+            + '\nBID: "bid amount"'
+            + "\nIf the action is to pass, write:"
+            + '\nPASS: "{reason or comment}"'
+            + "\nEither bid or pass but not both.\n\n"
+        )
+        full_result = self._generate_reaction(
+            observation, call_to_action_template, now=now
+        )
+        result = full_result.strip().split("\n")[0]
+        # AAA
+        self.memory.save_context(
+            {},
+            {
+                self.memory.add_memory_key: f"{self.name} observed "
+                f"{observation} and reacted by {result}",
+                self.memory.now_key: now,
+            },
+        )
+        if "BID:" in result:
+            bid_amount = int(self._clean_response(result.split("BID:")[-1]))
+            self.budget -= bid_amount  # Decrease budget
+            return True, f"{self.name} bids {bid_amount}"
+        if "PASS:" in result:
+            pass_value = self._clean_response(result.split("PASS:")[-1])
+            return False, f"{self.name} passes, saying {pass_value}"
+        else:
+            return False, result
+
+    def generate_bid_response(
+        self, observation: str, now: Optional[datetime] = None
+    ) -> Tuple[bool, str]:
+        """React to a given observation."""
+        call_to_action_template = (
+             "Given the current scenario in the auction, what would {agent_name} "
+            + "say? To end the participation, write:"
+            + ' GOODBYE: "reason or comment". Otherwise to continue,'
+            + ' write: SAY: "comment or statement"\n\n'
+        )
+        full_result = self._generate_reaction(
+            observation, call_to_action_template, now=now
+        )
+        result = full_result.strip().split("\n")[0]
+        if "GOODBYE:" in result:
+            farewell = self._clean_response(result.split("GOODBYE:")[-1])
+            self.memory.save_context(
+                {},
+                {
+                    self.memory.add_memory_key: f"{self.name} observed "
+                    f"{observation} and said {farewell}",
+                    self.memory.now_key: now,
+                },
+            )
+            return False, f"{self.name} said {farewell}"
+        if "SAY:" in result:
+            response_text = self._clean_response(result.split("SAY:")[-1])
+            self.memory.save_context(
+                {},
+                {
+                    self.memory.add_memory_key: f"{self.name} observed "
+                    f"{observation} and said {response_text}",
+                    self.memory.now_key: now,
+                },
+            )
+            return True, f"{self.name} said {response_text}"
+        else:
+            return False, result
+        
+    def get_summary(
+        self, force_refresh: bool = False, now: Optional[datetime] = None
+    ) -> str:
+        """Return a descriptive summary of the agent's auction activity."""
+        current_time = datetime.now() if now is None else now
+        since_refresh = (current_time - self.last_refreshed).seconds
+        if (
+            not self.summary
+            or since_refresh >= self.summary_refresh_seconds
+            or force_refresh
+        ):
+            self.summary = self._compute_agent_summary()
+            self.last_refreshed = current_time
+        age = self.age if self.age is not None else "N/A"
+        return (
+            f"Name: {self.name} (age: {age}, budget: {self.budget})"
+            + f"\nInnate traits: {self.traits}"
+            + f"\nItem of interest: {', ' + self.items_of_interest}"
+            + f"\n{self.summary}"
         )
